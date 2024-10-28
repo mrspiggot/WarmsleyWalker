@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 
@@ -98,3 +98,4 @@ class DDQState(TypedDict):
     json_output: Optional[Dict]
     response_states: Dict[str, ResponseState]  # question_id -> ResponseState
     completed_responses: Dict[str, ResponseGeneration]  # question_id -> final response
+    cost_tracking: Dict[str, Any]  # Cost tracking information
