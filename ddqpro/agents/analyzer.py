@@ -42,7 +42,11 @@ Return your analysis in the following JSON format:
     ],
     "completeness_score": float,
     "potential_issues": ["list of potential issues"]
-}}"""
+}}
+
+answer as an employee of the firm. Do not speculate about missing information, do not start answers with equivocal 
+phrases like: 'based on the provided context', rather answer the question as stated without embellishment sticking to 
+the facts"""
 
 
 class DocumentAnalyzer:
