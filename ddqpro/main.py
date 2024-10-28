@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from ddqpro.models.state import DDQState
 from ddqpro.graphs.workflow import build_workflow
 from ddqpro.rag.document_processor import CorpusProcessor
+from ddqpro.utils.cost_tracking import CostTracker
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +22,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-
 
 
 def setup_argument_parser() -> argparse.ArgumentParser:
@@ -39,11 +38,20 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         default='data/output',
         help='Directory for JSON output (default: data/output)'
     )
-    # Add new argument for corpus processing
     parser.add_argument(
         '--process-corpus',
         action='store_true',
         help='Process documents in data/corpus for RAG'
+    )
+    parser.add_argument(
+        '--reset-db',
+        action='store_true',
+        help='Reset vector database before processing corpus'
+    )
+    parser.add_argument(
+        '--show-db-info',
+        action='store_true',
+        help='Show information about the vector database'
     )
     parser.add_argument(
         '--debug',
@@ -51,14 +59,37 @@ def setup_argument_parser() -> argparse.ArgumentParser:
         help='Enable debug logging'
     )
     return parser
-def process_corpus():
+
+
+def process_corpus(reset_db: bool = False):
     """Process all documents in the corpus directory"""
     logger.info("Processing corpus documents")
     processor = CorpusProcessor(
         corpus_dir="data/corpus",
         db_dir="data/vectordb"
     )
-    processor.ingest_documents()
+
+    if reset_db:
+        logger.warning("Resetting vector database")
+
+    processor.ingest_documents(reset_db=reset_db)
+
+
+def show_db_info():
+    """Show information about the vector database"""
+    processor = CorpusProcessor(
+        corpus_dir="data/corpus",
+        db_dir="data/vectordb"
+    )
+    info = processor.get_database_info()
+
+    if info["exists"]:
+        logger.info(f"Vector database contains {info['document_count']} documents")
+        logger.info(f"Processed files: {len(info['processed_files'])}")
+        for file in info['processed_files']:
+            logger.info(f"  - {file}")
+    else:
+        logger.info("No vector database exists")
 
 def save_json_output(data: Dict, output_path: Path) -> None:
     """Save JSON output with proper formatting"""
@@ -70,6 +101,7 @@ def save_json_output(data: Dict, output_path: Path) -> None:
 def process_documents(input_dir: str, output_dir: str):
     """Process all documents in the input directory"""
     workflow = build_workflow()
+    cost_tracker = CostTracker()
 
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -92,7 +124,10 @@ def process_documents(input_dir: str, output_dir: str):
                 current_extractor="default",
                 extraction_results=None,
                 reflections=[],
-                json_output=None
+                json_output=None,
+                response_states={},
+                completed_responses={},
+                cost_tracking={'tracker': cost_tracker}
             )
 
             # Process document
@@ -106,67 +141,14 @@ def process_documents(input_dir: str, output_dir: str):
                     with open(output_path, 'w') as f:
                         json.dump(final_state['json_output'], f, indent=2)
 
+
+
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {str(e)}")
 
-    logger.info("Document processing complete")
-def process_documents_old(input_dir: str, output_dir: str):
-    """Process all documents in the input directory"""
-    workflow = build_workflow()
 
-    # Create output directory if it doesn't exist
-    os.makedirs(output_dir, exist_ok=True)
-    logger.info(f"Processing documents from {input_dir}")
-
-    input_path = Path(input_dir)
-    if not input_path.exists():
-        logger.error(f"Input directory does not exist: {input_dir}")
-        return
-
-    # Process each document
-    for file_path in input_path.glob('*'):
-        if file_path.suffix.lower() in ['.docx', '.pdf']:
-            logger.info(f"Starting processing of {file_path.name}")
-
-            # Skip processing if output file already exists
-            output_path = Path(output_dir) / f"{file_path.stem}.json"
-            if output_path.exists():
-                logger.info(f"Output file already exists for {file_path.name}, skipping...")
-                continue
-
-            # Initial state
-            state = DDQState(
-                input_path=str(file_path),
-                file_type=file_path.suffix.lower(),
-                current_extractor="default",
-                extraction_results=None,
-                reflections=[],
-                json_output=None
-            )
-
-            # Process document
-            try:
-                logger.info(f"Analyzing document structure...")
-                final_state = workflow.invoke(state)
-
-                if final_state.get('extraction_results'):
-                    logger.info(
-                        f"Analysis complete for {file_path.name}:\n"
-                        f"- Questions found: {final_state['extraction_results'].question_count}\n"
-                        f"- Sections found: {final_state['extraction_results'].section_count}\n"
-                        f"- Confidence score: {final_state['extraction_results'].confidence:.2f}"
-                    )
-
-                # Save JSON output
-                if final_state.get('json_output'):
-                    save_json_output(final_state['json_output'], output_path)
-                else:
-                    logger.warning(f"No JSON output generated for {file_path.name}")
-
-            except Exception as e:
-                logger.error(f"Error processing {file_path.name}: {str(e)}", exc_info=True)
-        else:
-            logger.warning(f"Skipping unsupported file: {file_path.name}")
+    logger.info("\nProcessing Cost Report:")
+    logger.info(cost_tracker.get_report())
 
     logger.info("Document processing complete")
 
