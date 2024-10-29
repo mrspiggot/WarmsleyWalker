@@ -24,7 +24,82 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+
+
 def setup_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="""
+DDQPro - AI-powered DDQ Processing Tool
+
+This tool processes Due Diligence Questionnaires (DDQs) and generates standardized JSON responses.
+It can also manage a corpus of documents for context-aware answer generation.
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    # Input/Output options
+    io_group = parser.add_argument_group('Input/Output Options')
+    io_group.add_argument(
+        '--input-dir',
+        type=str,
+        default='data/sample',
+        help='Directory containing DDQ documents to process (default: data/sample)'
+    )
+    io_group.add_argument(
+        '--output-dir',
+        type=str,
+        default='data/output',
+        help='Directory for JSON output files (default: data/output)'
+    )
+
+    # Corpus management
+    corpus_group = parser.add_argument_group('Corpus Management')
+    corpus_group.add_argument(
+        '--process-corpus',
+        action='store_true',
+        help='Process documents in data/corpus for RAG context'
+    )
+    corpus_group.add_argument(
+        '--reset-db',
+        action='store_true',
+        help='Reset vector database before processing corpus'
+    )
+    corpus_group.add_argument(
+        '--show-db-info',
+        action='store_true',
+        help='Show information about the current vector database'
+    )
+
+    # Processing options
+    processing_group = parser.add_argument_group('Processing Options')
+    processing_group.add_argument(
+        '--force',
+        action='store_true',
+        help='Force reprocessing of files even if output exists'
+    )
+    processing_group.add_argument(
+        '--batch-size',
+        type=int,
+        default=10,
+        help='Number of questions to process in parallel (default: 10)'
+    )
+
+    # Debug options
+    debug_group = parser.add_argument_group('Debug Options')
+    debug_group.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug logging'
+    )
+    debug_group.add_argument(
+        '--show-costs',
+        action='store_true',
+        help='Show estimated API costs after processing'
+    )
+
+    return parser
+
+def setup_argument_parser_old() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='Process DDQ documents into standardized JSON')
     parser.add_argument(
         '--input-dir',
@@ -132,20 +207,27 @@ def process_documents(input_dir: str, output_dir: str):
 
             # Process document
             try:
+                logger.info("Invoking workflow")
                 final_state = workflow.invoke(state)
 
-                # Save JSON output
+                logger.info("Workflow completed. Checking results...")
                 if final_state.get('json_output'):
                     output_path = Path(output_dir) / f"{file_path.stem}.json"
                     logger.info(f"Saving output to {output_path}")
-                    with open(output_path, 'w') as f:
-                        json.dump(final_state['json_output'], f, indent=2)
 
+                    # Log the content being saved
+                    logger.debug(f"JSON output content: {json.dumps(final_state['json_output'], indent=2)[:500]}...")
 
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        json.dump(final_state['json_output'], f, indent=2, ensure_ascii=False)
+
+                    logger.info(f"Successfully saved output to {output_path}")
+                else:
+                    logger.error("No json_output in final state")
+                    logger.debug(f"Final state keys: {list(final_state.keys())}")
 
             except Exception as e:
-                logger.error(f"Error processing {file_path}: {str(e)}")
-
+                logger.error(f"Error processing {file_path}: {str(e)}", exc_info=True)
 
     logger.info("\nProcessing Cost Report:")
     logger.info(cost_tracker.get_report())

@@ -89,12 +89,16 @@ class DocumentAnalyzer:
 
             # Extract all questions into a flat structure for easier access
             questions_flat = {}
+            logger.info("Analysis Result:")
+            logger.info(f"Sections: {len(analysis_result['sections'])}")
             for section in analysis_result['sections']:
+                logger.info(f"Section '{section['title']}': {len(section['questions'])} questions")
                 for question in section['questions']:
                     questions_flat[question['id']] = {
                         **question,
                         'section': section['title']
                     }
+            logger.info(f"Total Questions: {len(questions_flat)}")
 
             # Create ExtractionResult object
             extraction_result = ExtractionResult(
