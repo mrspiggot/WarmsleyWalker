@@ -54,7 +54,7 @@ class ResponseReflection(BaseModel):
     """Reflection on response quality"""
     accuracy_score: float = Field(description="Score for factual accuracy", ge=0, le=1)
     completeness_score: float = Field(description="Score for completeness", ge=0, le=1)
-    consistency_score: float = Field(description="Score for consistency with other responses", ge=0, le=1)
+    consistency: float = Field(description="Score for consistency with other responses", ge=0, le=1)
     issues: List[str] = Field(description="Identified issues with the response")
     suggestions: List[str] = Field(description="Suggestions for improvement")
 

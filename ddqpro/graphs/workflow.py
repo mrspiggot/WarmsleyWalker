@@ -9,39 +9,47 @@ from ddqpro.rag.retriever import RAGRetriever
 import asyncio
 from ddqpro.models.state import Question, QuestionMetadata
 import logging
+from ddqpro.models.llm_manager import LLMManager
+from ddqpro.graphs.reflection_graph import ReflectionGraph
 
 logger = logging.getLogger(__name__)
 
 
 def sync_process_questions(state: DDQState):
     """Synchronous wrapper for async process_questions"""
-    logger.info("Starting sync_process_questions")
+    logger.info("Starting sync_process_questions with detailed debugging")
     processor = EnhancedProcessor(retriever=RAGRetriever())
+
+    # Debug state content
+    logger.debug(f"Initial state keys: {state.keys()}")
+    logger.debug(f"Extraction results present: {bool(state.get('extraction_results'))}")
 
     if not state.get('extraction_results'):
         logger.error("No extraction_results in state")
         return state
 
     questions_dict = state['extraction_results'].content.get('questions', {})
+    logger.debug(f"Number of questions found: {len(questions_dict)}")
+    logger.debug(f"Question IDs: {list(questions_dict.keys())}")
+
     if not questions_dict:
         logger.error("No questions found in extraction_results")
         return state
 
-    # Log the questions found
-    logger.info(f"Found {len(questions_dict)} questions to process")
-    for qid, q_dict in questions_dict.items():
-        logger.debug(f"Question {qid}: {q_dict.get('text', '')[:100]}...")
-
-    # Convert question dictionaries to Question objects
+    # Convert question dictionaries to Question objects with detailed logging
     questions_list = []
     for qid, q_dict in questions_dict.items():
         try:
+            logger.debug(f"Processing question {qid}")
+            logger.debug(f"Question data: {q_dict}")
+
             # Create metadata object
             metadata = QuestionMetadata(
                 category=q_dict.get('metadata', {}).get('category', 'unknown'),
                 subcategory=q_dict.get('metadata', {}).get('subcategory'),
                 context=q_dict.get('metadata', {}).get('context')
             )
+            logger.debug(f"Created metadata for question {qid}")
 
             # Create question object
             question = Question(
@@ -55,7 +63,7 @@ def sync_process_questions(state: DDQState):
             questions_list.append(question)
             logger.debug(f"Successfully created Question object for {qid}")
         except Exception as e:
-            logger.error(f"Error converting question {qid} to Question object: {str(e)}")
+            logger.error(f"Error converting question {qid} to Question object: {str(e)}", exc_info=True)
             continue
 
     if not questions_list:
@@ -72,39 +80,43 @@ def sync_process_questions(state: DDQState):
             section=section
         ))
 
-        if not answers:
+        logger.debug(f"Answers received: {bool(answers)}")
+        if answers:
+            logger.debug(f"Number of answers: {len(answers)}")
+            logger.debug(f"Answer IDs: {list(answers.keys())}")
+        else:
             logger.error("No answers generated")
-            return state
-
-        logger.info(f"Generated {len(answers)} answers")
 
         # Update state with answers
         if 'json_output' not in state:
             state['json_output'] = {}
+            logger.debug("Created new json_output in state")
 
-        # Log each answer being added
-        for qid, answer in answers.items():
-            logger.debug(f"Adding answer for question {qid}: {answer.text[:100]}...")
-
-        state['json_output']['answers'] = {
-            qid: {
-                "text": answer.text,
-                "confidence": answer.confidence,
-                "sources": [
-                    {"file": src['source'], "excerpt": src['content'][:200]}
-                    for src in answer.sources
-                ],
-                "metadata": answer.metadata
+        if answers:
+            state['json_output']['answers'] = {
+                qid: {
+                    "text": answer.text,
+                    "confidence": answer.confidence,
+                    "sources": [
+                        {"file": src['source'], "excerpt": src['content'][:200]}
+                        for src in answer.sources
+                    ],
+                    "metadata": answer.metadata
+                }
+                for qid, answer in answers.items()
             }
-            for qid, answer in answers.items()
-        }
-
-        logger.info("Successfully updated state with answers")
+            logger.info(f"Successfully added {len(answers)} answers to state")
+            logger.debug(f"Final state keys: {state['json_output'].keys()}")
+        else:
+            logger.error("No answers to add to state")
 
     except Exception as e:
         logger.error(f"Error processing questions: {str(e)}", exc_info=True)
+        logger.debug("Full state at error:", state)
 
     return state
+
+
 def sync_process_questions_old(state: DDQState):
     """Synchronous wrapper for async process_questions"""
     processor = EnhancedProcessor(retriever=RAGRetriever())
@@ -162,16 +174,118 @@ def sync_process_questions_old(state: DDQState):
 
     return state
 
+# In graphs/workflow.py
 
-def build_workflow() -> StateGraph:
+def build_workflow(provider: str = None, model_name: str = None) -> StateGraph:
     """Construct the DDQ processing workflow"""
+    logger.info("\nBuilding workflow...")
+
+    # Initialize LLM first, before building workflow
+    if provider and model_name:
+        logger.info(f"Initializing LLM with provider: {provider}, model: {model_name}")
+        llm_manager = LLMManager()
+        llm_manager.initialize(provider, model_name)
+        logger.info("LLM initialization complete")
+
     workflow = StateGraph(DDQState)
 
     # Add nodes
-    workflow.add_node("analyze", DocumentAnalyzer().analyze)
-    workflow.add_node("process", sync_process_questions)  # Using sync wrapper
+    analyzer = DocumentAnalyzer()
+
+    def analyze_with_debug(state: DDQState) -> DDQState:
+        logger.info("\nStarting analysis node")
+        try:
+            result = analyzer.analyze(state)
+            logger.info("Analysis completed successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Error in analysis node: {str(e)}")
+            raise
+
+    # Define the basic workflow
+    workflow.add_node("analyze", analyze_with_debug)
+    workflow.add_node("process", sync_process_questions)
     workflow.add_node("reflect", ExtractionReflector().reflect)
 
+    # Define the linear flow
+    workflow.add_edge(START, "analyze")
+    workflow.add_edge("analyze", "process")
+    workflow.add_edge("process", "reflect")
+    workflow.add_edge("reflect", END)
+
+    logger.info("Workflow build complete")
+    return workflow.compile()
+
+def build_workflow_old(provider: str = None, model_name: str = None) -> StateGraph:
+    """Construct the DDQ processing workflow"""
+    print("\nBuilding workflow...")  # Debug print
+
+    # Initialize LLM first, before building workflow
+    if provider and model_name:
+        print(f"Initializing LLM with provider: {provider}, model: {model_name}")  # Debug print
+        llm_manager = LLMManager()
+        llm_manager.initialize(provider, model_name, temperature=0)
+        print("LLM initialization complete")  # Debug print
+    else:
+        print("No provider/model specified, skipping LLM initialization")  # Debug print
+
+    workflow = StateGraph(DDQState)
+    # Initialize reflection graph
+    reflection = ReflectionGraph(max_attempts=3)
+    reflection_graph = reflection.build()
+
+    # Add reflection node
+    def analyze_with_reflection(state: DDQState) -> DDQState:
+        analyzer = DocumentAnalyzer()
+
+        # Initial analysis attempt
+        try:
+            result = analyzer.analyze(state)
+
+            # Validate JSON through reflection graph
+            reflection_state = {
+                "content": result.get("json_output", {}),
+                "attempts": 0,
+                "current_model": model_name,
+                "validation_error": None,
+                "validated_json": None,
+                "original_prompt": state["input_prompt"]
+            }
+
+            final_state = reflection_graph.invoke(reflection_state)
+
+            if final_state["validated_json"]:
+                result["json_output"] = final_state["validated_json"]
+            else:
+                raise ValueError(f"Failed to generate valid JSON: {final_state['validation_error']}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Analysis failed: {str(e)}")
+            raise
+
+    workflow.add_node("analyze", analyze_with_reflection)
+
+    # Add nodes with debug prints
+    print("Adding workflow nodes...")  # Debug print
+    analyzer = DocumentAnalyzer()
+
+    def analyze_with_debug(state: DDQState) -> DDQState:
+        print("\nStarting analysis node")  # Debug print
+        try:
+            result = analyzer.analyze(state)
+            print("Analysis completed successfully")  # Debug print
+            return result
+        except Exception as e:
+            print(f"Error in analysis node: {str(e)}")  # Debug print
+            raise
+
+    workflow.add_node("analyze", analyze_with_debug)
+    workflow.add_node("process", sync_process_questions)
+    workflow.add_node("reflect", ExtractionReflector().reflect)
+
+    print("Adding workflow edges...")  # Debug print
     # Add edges
     workflow.add_edge(START, "analyze")
     workflow.add_edge("analyze", "process")
@@ -182,11 +296,12 @@ def build_workflow() -> StateGraph:
         "reflect",
         ExtractionReflector().should_retry,
         {
-            "process": "process",  # Retry processing if needed
-            END: END  # End if processing is complete
+            "process": "process",
+            END: END
         }
     )
 
+    print("Workflow build complete")  # Debug print
     return workflow.compile()
 
 

@@ -65,7 +65,11 @@ class RAGRetriever:
         """Retrieve relevant context for a specific question"""
         try:
             # Get relevant documents using base retriever
-            docs = await self.base_retriever.aget_relevant_documents(
+            # docs = await self.base_retriever.aget_relevant_documents(
+            #     question,
+            #     filter=metadata_filter
+            # )
+            docs = await self.base_retriever.ainvoke(
                 question,
                 filter=metadata_filter
             )

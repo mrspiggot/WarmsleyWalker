@@ -173,9 +173,9 @@ def save_json_output(data: Dict, output_path: Path) -> None:
     logger.info(f"Saved output to {output_path}")
 
 
-def process_documents(input_dir: str, output_dir: str):
+def process_documents(input_dir: str, output_dir: str, provider: str = None, model_name: str = None):
     """Process all documents in the input directory"""
-    workflow = build_workflow()
+    workflow = build_workflow(provider, model_name)
     cost_tracker = CostTracker()
 
     # Create output directory if it doesn't exist

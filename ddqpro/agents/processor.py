@@ -7,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from ddqpro.models.state import DDQState, Answer, Question
 from ddqpro.rag.retriever import RAGRetriever
 from ddqpro.utils.cost_tracking import CostTracker
+from ddqpro.models.llm_manager import LLMManager
 
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ class SectionProcessor:
 
     def __init__(self):
         self.retriever = RAGRetriever()
-        self.llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
+        self.llm_manager = LLMManager()
         self.context_cache = {}  # Section-level context cache
         self.cost_tracker = CostTracker()
 
@@ -118,7 +119,7 @@ class SectionProcessor:
         Answer:
         """)
 
-        chain = prompt | self.llm
+        chain = prompt | self.llm_manager.llm
         response = await chain.ainvoke({
             "question": question.text,
             "category": question.metadata.category,

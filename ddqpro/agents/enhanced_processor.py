@@ -11,7 +11,7 @@ from ddqpro.utils.confidence_scoring import ConfidenceScorer
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 import time
-
+from ddqpro.models.llm_manager import LLMManager
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +29,7 @@ class EnhancedProcessor:
         self.retriever = retriever
         self.text_analyzer = TextAnalyzer()
         self.context_cache = {}
-        self.llm = ChatOpenAI(model="gpt-4-turbo-preview", temperature=0)
+        self.llm_manager = LLMManager()
         self.confidence_scorer = ConfidenceScorer()
         self.previous_answers = {}
         self.answer_prompt = ChatPromptTemplate.from_messages([
@@ -87,41 +87,53 @@ class EnhancedProcessor:
             )
         }
 
-    async def process_questions(self,
-                                questions: List[Question],
-                                section: str) -> Dict[str, Answer]:
-        """Process questions with optimized strategies"""
+    async def process_questions(self, questions: List[Question], section: str) -> Dict[str, Answer]:
+        """Process questions with optimized strategies and detailed logging"""
         logger.info(f"Starting to process {len(questions)} questions from section {section}")
 
-        # Analyze questions
-        analyzed_questions = [
-            {
-                'question': q,
-                'analysis': self.text_analyzer.analyze_question_type(q.text)
-            }
-            for q in questions
-        ]
+        # Log question details
+        for q in questions:
+            logger.debug(f"Question {q.id}: {q.text[:100]}...")
+            logger.debug(f"Question type: {q.type}")
+            logger.debug(f"Question metadata: {q.metadata}")
 
         try:
-            # Group questions by type and similarity
-            grouped_questions = self._group_questions(analyzed_questions)
+            # Analyze questions
+            analyzed_questions = [
+                {
+                    'question': q,
+                    'analysis': self.text_analyzer.analyze_question_type(q.text)
+                }
+                for q in questions
+            ]
+            logger.debug(f"Question analysis complete: {len(analyzed_questions)} questions analyzed")
 
-            # Process each group with appropriate strategy
+            # Group questions
+            grouped_questions = self._group_questions(analyzed_questions)
+            logger.debug(f"Questions grouped into {len(grouped_questions)} groups")
+
+            # Process each group
             results = {}
             for group_type, group_data in grouped_questions.items():
                 logger.info(f"Processing group {group_type} with {len(group_data['questions'])} questions")
 
                 q_type = group_data['type']
                 strategy = self.strategies.get(q_type, self.strategies['factual'])
+                logger.debug(f"Using strategy: {q_type}")
 
-                group_results = await self._process_group(
-                    questions=group_data['questions'],
-                    strategy=strategy,
-                    shared_context=group_data.get('shared_context')
-                )
-                results.update(group_results)
+                try:
+                    group_results = await self._process_group(
+                        questions=group_data['questions'],
+                        strategy=strategy,
+                        shared_context=group_data.get('shared_context')
+                    )
+                    logger.debug(f"Group {group_type} processing complete, got {len(group_results)} answers")
+                    results.update(group_results)
+                except Exception as e:
+                    logger.error(f"Error processing group {group_type}: {str(e)}", exc_info=True)
 
             logger.info(f"Successfully processed {len(results)} questions")
+            logger.debug(f"Answer IDs: {list(results.keys())}")
             return results
 
         except Exception as e:
@@ -332,12 +344,8 @@ class EnhancedProcessor:
         try:
             logger.info(f"Generating answer for question {question.id}")
 
-            # Log the context being used
-            logger.debug(f"Using context with {len(context['content'])} chunks")
-
             # Generate answer
-            chain = self.answer_prompt | self.llm
-            logger.debug("Invoking LLM chain")
+            chain = self.answer_prompt | self.llm_manager.llm
             response = await chain.ainvoke({
                 "question": question.text,
                 "question_type": question.type,
@@ -345,49 +353,44 @@ class EnhancedProcessor:
                 "context": self._format_context(context['content'])
             })
 
-            # Extract the actual response text
+            # Extract response text
             response_text = response.content if hasattr(response, 'content') else str(response)
-            logger.debug(f"Generated response of length {len(response_text)}")
 
+            # Calculate confidence with error handling
             try:
-                # Calculate confidence scores
-                logger.debug("Calculating confidence scores")
                 confidence_score, metrics = self.confidence_scorer.calculate_confidence(
                     question=question.text,
                     answer=response_text,
                     context=context['content'],
                     response_metadata={
                         'token_usage': getattr(response, 'usage', {}).get('total_tokens', 0),
+                        'generation_time': 0.0  # Add timing if needed
                     },
                     previous_answers=self.previous_answers
                 )
-                logger.debug(f"Calculated confidence score: {confidence_score}")
             except Exception as e:
                 logger.error(f"Error calculating confidence: {str(e)}")
                 confidence_score = 0.7
                 metrics = None
 
             # Create answer object
-            try:
-                logger.debug("Creating Answer object")
-                answer = Answer(
-                    text=response_text,
-                    confidence=confidence_score,
-                    sources=context['content'],
-                    metadata={
-                        'question_type': question.type,
-                        'generated_at': datetime.utcnow().isoformat(),
-                        'context_query': context.get('query'),
-                        'key_terms': context.get('terms'),
-                        'confidence_metrics': metrics.__dict__ if metrics else None
-                    }
-                )
-                logger.info(f"Successfully generated answer for question {question.id}")
-                return answer
+            answer = Answer(
+                text=response_text,
+                confidence=confidence_score,
+                sources=context['content'],
+                metadata={
+                    'question_type': question.type,
+                    'generated_at': datetime.utcnow().isoformat(),
+                    'context_query': context.get('query'),
+                    'key_terms': context.get('terms'),
+                    'confidence_metrics': metrics.__dict__ if metrics else None
+                }
+            )
 
-            except Exception as e:
-                logger.error(f"Error creating Answer object: {str(e)}")
-                raise
+            # Store for future consistency checking
+            self.previous_answers[question.id] = response_text
+
+            return answer
 
         except Exception as e:
             logger.error(f"Error in _generate_answer for question {question.id}: {str(e)}")

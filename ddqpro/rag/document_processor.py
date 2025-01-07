@@ -7,6 +7,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from pydantic import BaseModel
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,19 @@ class CorpusProcessor:
         Args:
             reset_db: If True, deletes existing vector database before processing
         """
+        logger.debug("\n=== Starting Document Ingestion ===")
+        logger.debug(f"Corpus directory: {self.corpus_dir}")
+        logger.debug(f"DB directory: {self.db_dir}")
+
         logger.info(f"Processing documents from {self.corpus_dir}")
+
+        logger.debug(f"Corpus directory contents: {list(self.corpus_dir.glob('**/*'))}")
+        logger.debug(f"Previously processed files: {self._get_processed_files()}")
+
+        # Debug current directory contents
+        logger.debug("Corpus directory contents:")
+        for file_path in self.corpus_dir.glob('**/*'):
+            logger.debug(f"  - {file_path}")
 
         if reset_db:
             self._reset_vector_db()
@@ -51,6 +64,12 @@ class CorpusProcessor:
 
         documents = []
         processed_files = self._get_processed_files()
+
+        # Debug processed files
+        processed_files = self._get_processed_files()
+        logger.debug("Previously processed files:")
+        for file in processed_files:
+            logger.debug(f"  - {file}")
 
         for file_path in self.corpus_dir.glob('**/*'):
             try:

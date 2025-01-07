@@ -69,7 +69,7 @@ class ResponseWorkflow:
         avg_score = (
                             latest_reflection.accuracy_score +
                             latest_reflection.completeness_score +
-                            latest_reflection.consistency_score
+                            latest_reflection.consistency
                     ) / 3
 
         return "refine" if avg_score < 0.8 else END
