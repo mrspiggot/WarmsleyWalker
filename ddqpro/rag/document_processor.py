@@ -2,12 +2,12 @@ from typing import List, Dict, Optional
 from pathlib import Path
 import logging
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_unstructured import UnstructuredLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from pydantic import BaseModel
 import shutil
+from langchain_unstructured import UnstructuredLoader
 
 logger = logging.getLogger(__name__)
 
