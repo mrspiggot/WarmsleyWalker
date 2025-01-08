@@ -1,4 +1,4 @@
-# ddqpro/gui/app.py
+# app.py
 
 import streamlit as st
 from pathlib import Path
