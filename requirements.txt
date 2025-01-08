@@ -14,7 +14,6 @@ backoff==2.2.1
 bcrypt==4.2.0
 beautifulsoup4==4.12.3
 blinker==1.8.2
-blis==1.0.1
 build==1.2.2.post1
 cachetools==5.5.0
 catalogue==2.0.10
@@ -33,7 +32,7 @@ cryptography==43.0.3
 cycler==0.12.1
 cymem==2.0.8
 dataclasses-json==0.6.7
--e git+https://github.com/mrspiggot/WarmsleyWalker.git@8a93b746ba4e0e529d30b48f7c8209551e99a4c1#egg=ddqpro
+-e git+https://github.com/mrspiggot/WarmsleyWalker.git@bbb0c331052dad34839de0cf6a27c0a9a9d20696#egg=ddqpro
 deepdiff==8.0.1
 defusedxml==0.7.1
 Deprecated==1.2.14
