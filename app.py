@@ -23,7 +23,7 @@ class DDQApp:
         self.setup_page()
         self.corpus_processor = CorpusProcessor(
             corpus_dir="ddqpro/gui/data/corpus",
-            db_dir="ddqpro/gui/data/vectordb"
+
         )
         self.workflow = build_workflow()
         self.sidebar = Sidebar()

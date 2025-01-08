@@ -4,10 +4,11 @@ import logging
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain_chroma import Chroma
 from pydantic import BaseModel
 import shutil
 from langchain_unstructured import UnstructuredLoader
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,8 @@ class DocumentMetadata(BaseModel):
 
 
 class CorpusProcessor:
-    def __init__(self, corpus_dir: str, db_dir: str = "data/vectordb"):
+    def __init__(self, corpus_dir: str = "data/corpus"):
         self.corpus_dir = Path(corpus_dir)
-        self.db_dir = Path(db_dir)
         self.embeddings = OpenAIEmbeddings()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -32,90 +32,76 @@ class CorpusProcessor:
             length_function=len,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+        # InMemoryVectorStore will store all docs in memory only.
+        # If you want to persist them across sessions, this won't do that.
+        self.vector_store = InMemoryVectorStore(embedding=self.embeddings)
 
     def ingest_documents(self, reset_db: bool = False) -> None:
-        """Process all documents in the corpus directory
-
-        Args:
-            reset_db: If True, deletes existing vector database before processing
+        """
+        Process all documents in the corpus directory and store them in memory.
+        If reset_db=True, we can optionally clear out anything we've previously stored.
         """
         logger.debug("\n=== Starting Document Ingestion ===")
         logger.debug(f"Corpus directory: {self.corpus_dir}")
-        logger.debug(f"DB directory: {self.db_dir}")
+
+        if reset_db:
+            logger.info("reset_db=True requested; clearing in‑memory documents (if any)")
+            # Because InMemoryVectorStore doesn’t persist data, a simple re‑instantiate is enough:
+            self.vector_store = InMemoryVectorStore(embedding=self.embeddings)
 
         logger.info(f"Processing documents from {self.corpus_dir}")
 
-        logger.debug(f"Corpus directory contents: {list(self.corpus_dir.glob('**/*'))}")
-        logger.debug(f"Previously processed files: {self._get_processed_files()}")
-
-        # Debug current directory contents
-        logger.debug("Corpus directory contents:")
-        for file_path in self.corpus_dir.glob('**/*'):
-            logger.debug(f"  - {file_path}")
-
-        if reset_db:
-            self._reset_vector_db()
-
-        # Check if vector database already exists
-        if self.db_dir.exists():
-            logger.info(f"Vector database exists at {self.db_dir}")
-            if not reset_db:
-                logger.info("Adding new documents to existing database")
-
+        # Collect new documents as we parse them
         documents = []
-        processed_files = self._get_processed_files()
 
-        # Debug processed files
-        processed_files = self._get_processed_files()
-        logger.debug("Previously processed files:")
-        for file in processed_files:
-            logger.debug(f"  - {file}")
+        # Traverse all files in corpus dir
+        for file_path in self.corpus_dir.glob("**/*"):
+            # skip directories
+            if not file_path.is_file():
+                continue
 
-        for file_path in self.corpus_dir.glob('**/*'):
             try:
-                # Skip already processed files unless resetting
-                if not reset_db and str(file_path) in processed_files:
-                    logger.info(f"Skipping already processed file: {file_path}")
-                    continue
-
-                if file_path.suffix.lower() == '.pdf':
+                if file_path.suffix.lower() == ".pdf":
                     logger.info(f"Processing PDF: {file_path}")
                     loader = PyPDFLoader(str(file_path))
                     docs = loader.load()
-                elif file_path.suffix.lower() in ['.docx', '.txt']:
+                elif file_path.suffix.lower() in [".docx", ".txt"]:
                     logger.info(f"Processing document: {file_path}")
                     loader = UnstructuredLoader(str(file_path))
                     docs = loader.load()
                 else:
-                    logger.warning(f"Unsupported file type: {file_path}")
+                    logger.warning(f"Skipping unsupported file type: {file_path}")
                     continue
 
-                # Split documents into chunks
+                # Split into chunks
                 chunks = self.text_splitter.split_documents(docs)
 
-                # Add metadata to each chunk
+                # Add helpful metadata to each chunk
                 for i, chunk in enumerate(chunks):
                     chunk.metadata.update({
-                        'source_file': str(file_path),
-                        'doc_type': self._determine_doc_type(file_path),
-                        'date_added': str(Path(file_path).stat().st_mtime),
-                        'chunk_index': i,
-                        'total_chunks': len(chunks)
+                        "source_file": str(file_path),
+                        "doc_type": self._determine_doc_type(file_path),
+                        "chunk_index": i,
+                        "total_chunks": len(chunks),
                     })
 
+                # Accumulate them all
                 documents.extend(chunks)
-                # Record processed file
-                self._record_processed_file(str(file_path))
-                logger.info(f"Successfully processed {file_path}: {len(chunks)} chunks created")
+                logger.info(
+                    f"Successfully processed {file_path}: {len(chunks)} chunks created"
+                )
 
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {str(e)}")
 
-        # Store documents in vector database
+        # Add all the new documents to our in‑memory vector store
         if documents:
-            self._store_documents(documents)
+            logger.info(f"Adding {len(documents)} document chunks to in‑memory store...")
+            self.vector_store.add_documents(documents=documents)
+            logger.info("In‑memory ingestion complete.")
         else:
-            logger.warning("No new documents to process")
+            logger.warning("No new documents found or processed.")
+
 
     def _reset_vector_db(self):
         """Delete existing vector database"""
@@ -156,24 +142,24 @@ class CorpusProcessor:
             return 'OTHER'
 
     def _store_documents(self, documents: List) -> None:
-        """Store documents in the vector database"""
         if not documents:
             logger.warning("No documents to store")
             return
 
         try:
-            logger.info(f"Storing {len(documents)} document chunks in vector database")
-            vectorstore = Chroma(
-                persist_directory=str(self.db_dir),
-                embedding_function=self.embeddings
-            )
+            logger.info(f"Storing {len(documents)} document chunks in an in-memory vector store")
+            # 1) Create an in-memory store
+            vectorstore = InMemoryVectorStore(embedding=self.embeddings)
 
-            # Add new documents to existing database
-            vectorstore.add_documents(documents)
-            logger.info("Successfully stored documents in vector database")
+            # 2) Add documents
+            vectorstore.add_documents(documents=documents)
+            logger.info("Successfully stored documents in memory (non-persistent)")
+
+            # Because it’s in-memory only, you lose the ability to load these docs
+            # later once the Python process exits.
 
         except Exception as e:
-            logger.error(f"Error storing documents in vector database: {str(e)}")
+            logger.error(f"Error storing documents in in-memory vector store: {str(e)}")
             raise
 
     def get_database_info(self) -> Dict:
