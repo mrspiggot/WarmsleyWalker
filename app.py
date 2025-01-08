@@ -22,8 +22,8 @@ class DDQApp:
     def __init__(self):
         self.setup_page()
         self.corpus_processor = CorpusProcessor(
-            corpus_dir="data/corpus",
-            db_dir="data/vectordb"
+            corpus_dir="ddqpro/gui/data/corpus",
+            db_dir="ddqpro/gui/data/vectordb"
         )
         self.workflow = build_workflow()
         self.sidebar = Sidebar()
@@ -216,7 +216,7 @@ class DDQApp:
                 logger.debug(f"Processing file: {file.name} of type {type(file)}")
 
                 # Save uploaded file temporarily
-                file_path = Path("data/corpus") / file.name
+                file_path = Path("ddqpro/gui/data/corpus") / file.name
                 file_path.parent.mkdir(parents=True, exist_ok=True)
 
                 # Use the content directly from our custom UploadedFile
@@ -234,7 +234,7 @@ class DDQApp:
         """Process DDQ document"""
         try:
             # Save uploaded file temporarily
-            file_path = Path("data/input") / ddq_file.name
+            file_path = Path("ddqpro/gui/data/input") / ddq_file.name
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Use the content directly from our custom UploadedFile
