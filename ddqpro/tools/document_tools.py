@@ -2,11 +2,35 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from typing import Dict, List
 import logging
+import pdfplumber
 
 logger = logging.getLogger(__name__)
 
 
 class PDFExtractor:
+    def extract(self, file_path: str) -> Dict:
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                pages_text = []
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    pages_text.append(text)
+            full_text = "\n\n".join(pages_text)
+            ...
+            return {
+                "raw_content": full_text,
+                "format": "text",
+                "success": True
+            }
+
+        except Exception as e:
+            logger.error(f"Error extracting PDF content: {str(e)}")
+            return {
+                'error': str(e),
+                'success': False
+            }
+
+class PDFExtractorFitz:
     def extract(self, file_path: str) -> Dict:
         try:
             logger.info(f"Extracting content from PDF: {file_path}")

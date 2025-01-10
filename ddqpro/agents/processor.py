@@ -108,16 +108,21 @@ class SectionProcessor:
     async def _generate_answer(self, question: Question, context: List[Dict]) -> str:
         """Generate answer using LLM"""
         prompt = ChatPromptTemplate.from_template("""
-        Answer this DDQ question accurately and professionally.
-        Question: {question}
-        Category: {category}
-        Context: {context}
+                Use your skill and judgement to give the most likely answer to this question given the Context. 
+                The answer may not be explicit but use your judgement to give the most likely answer.
+                Question: {question}
+                Category: {category}
+                Context: {context}
 
-        Answer the question directly and factually. Do not use phrases like 
-        "Based on the context" or "The information suggests". Just state the facts.
+                Answer the question asked in the context of an employee of an investment management firm. Bear in mind the 
+                context and vernacular of the fund management industry. Things like 'Company name' and 'Manager name' or 
+                'Investment Manager' all mean the same thing. Think holistically about this for all questions and pull out the 
+                information based on semantics not matching of keywords
+                
+                Always provide an answer, provide the best answer you can given the Context
 
-        Answer:
-        """)
+                Answer:
+                """)
 
         chain = prompt | self.llm_manager.llm
         response = await chain.ainvoke({

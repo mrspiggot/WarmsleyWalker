@@ -9,8 +9,21 @@ import shutil
 from langchain_unstructured import UnstructuredLoader
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.documents import Document
+import pdfplumber
 
 logger = logging.getLogger(__name__)
+class PDFPlumberLoader:
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+
+    def load(self) -> List[Document]:
+        docs = []
+        with pdfplumber.open(self.file_path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text() or ""
+                metadata = {"source_file": self.file_path, "page_number": i}
+                docs.append(Document(page_content=text, metadata=metadata))
+        return docs
 
 
 class DocumentMetadata(BaseModel):
@@ -63,7 +76,8 @@ class CorpusProcessor:
             try:
                 if file_path.suffix.lower() == ".pdf":
                     logger.info(f"Processing PDF: {file_path}")
-                    loader = PyPDFLoader(str(file_path))
+                    # loader = PyPDFLoader(str(file_path)) Fitz style
+                    loader = PDFPlumberLoader(str(file_path))
                     docs = loader.load()
                 elif file_path.suffix.lower() in [".docx", ".txt"]:
                     logger.info(f"Processing document: {file_path}")
