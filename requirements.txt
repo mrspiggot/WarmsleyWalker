@@ -31,7 +31,7 @@ certifi==2024.12.14
 cffi==1.17.1
 charset-normalizer==3.4.1
 chroma-hnswlib==0.7.6
-chromadb==0.5.23
+chromadb>=0.4.24,<0.5.0
 ci-info==0.3.0
 cleo==2.1.0
 click==8.1.8
@@ -48,7 +48,7 @@ crashtest==0.4.1
 cycler==0.12.1
 cymem==2.0.10
 dataclasses-json==0.6.7
-
+git+https://github.com/mrspiggot/WarmsleyWalker.git@ec07d04ea2d3d5bdb1608b1b68a33e17eb9e0e3d
 defusedxml==0.7.1
 Deprecated==1.2.15
 distlib==0.3.8
