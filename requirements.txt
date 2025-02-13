@@ -43,12 +43,12 @@ configobj==5.0.9
 configparser==7.1.0
 contourpy==1.2.1
 crashtest==0.4.1
-crewai==0.61.0
-cryptography>=43.0.1,<44.0.0
+
+
 cycler==0.12.1
 cymem==2.0.10
 dataclasses-json==0.6.7
--e git+https://github.com/mrspiggot/WarmsleyWalker.git@ec07d04ea2d3d5bdb1608b1b68a33e17eb9e0e3d#egg=ddqpro
+
 defusedxml==0.7.1
 Deprecated==1.2.15
 distlib==0.3.8
