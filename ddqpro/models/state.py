@@ -2,7 +2,12 @@ from typing import Dict, List, Optional, Any
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 
-
+class ExtractionMetadata(BaseModel):
+    extractor_used: str = Field(..., description="Name of the extractor used")
+    quality_score: float = Field(..., description="Quality score of extraction")
+    extraction_time: float = Field(..., description="Time taken for extraction")
+    metadata: Dict = Field(default_factory=dict, description="Additional extraction metadata")
+    error: Optional[str] = Field(None, description="Error message if extraction failed")
 class QuestionMetadata(BaseModel):
     """Metadata for a DDQ question"""
     category: str = Field(description="Primary category of the question")
@@ -70,8 +75,8 @@ class Answer(BaseModel):
     """Answer to a DDQ question"""
     text: str = Field(description="Generated answer text")
     confidence: float = Field(description="Confidence score for the answer", ge=0, le=1)
-    sources: List[Dict] = Field(description="Source documents used for the answer")
-    metadata: Dict = Field(description="Additional metadata about the answer")
+    sources: List[Dict] = Field(description="Source documents used for the answer", default_factory=list)
+    metadata: Dict = Field(description="Additional metadata about the answer", default_factory=dict)
 
 class QuestionAnswerPair(BaseModel):
     """Represents a question and its answer"""
@@ -99,3 +104,4 @@ class DDQState(TypedDict):
     response_states: Dict[str, ResponseState]  # question_id -> ResponseState
     completed_responses: Dict[str, ResponseGeneration]  # question_id -> final response
     cost_tracking: Dict[str, Any]  # Cost tracking information
+    extraction_metadata: Optional[ExtractionMetadata]  # New field for extraction info

@@ -4,13 +4,106 @@ import logging
 from datetime import datetime
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from ddqpro.models.state import DDQState, Answer, Question
+from ddqpro.models.state import DDQState, Answer, Question, QuestionMetadata
 from ddqpro.rag.retriever import RAGRetriever
 from ddqpro.utils.cost_tracking import CostTracker
 from ddqpro.models.llm_manager import LLMManager
-
+from ddqpro.agents.enhanced_processor import EnhancedProcessor
+from ddqpro.rag.retriever import RAGRetriever
+from ddqpro.rag.document_processor import CorpusProcessor
 
 logger = logging.getLogger(__name__)
+
+
+def sync_process_questions(state: DDQState) -> DDQState:
+    """Synchronous wrapper for async question processing"""
+    logger.info("Starting sync_process_questions with detailed state inspection")
+
+    # Instantiate CorpusProcessor and ingest documents
+    corpus_processor = CorpusProcessor(corpus_dir="ddqpro/gui/data/corpus")
+    corpus_processor.ingest_documents(reset_db=False)
+
+    # Create a RAGRetriever using the pre-populated vector store
+    retriever = RAGRetriever(vector_store=corpus_processor.vector_store)
+    processor = EnhancedProcessor(retriever=retriever)
+
+    logger.debug(f"State keys: {state.keys()}")
+
+    if not state.get('json_output'):
+        logger.error("No json_output in state")
+        return state
+
+    sections = state['json_output'].get('sections', [])
+    if not sections:
+        logger.error("No sections found in json_output")
+        return state
+
+    questions_list = []
+    for section in sections:
+        for q_dict in section.get('questions', []):
+            try:
+                # Skip questions with incomplete data
+                if not all(key in q_dict for key in ['id', 'text', 'type', 'metadata']):
+                    logger.warning(f"Skipping question {q_dict.get('id', 'unknown')}: incomplete data")
+                    continue
+
+                # Create metadata with defaults for missing fields
+                metadata = QuestionMetadata(
+                    category=q_dict.get('metadata', {}).get('category', 'unknown'),
+                    subcategory=q_dict.get('metadata', {}).get('subcategory', 'general'),
+                    context=q_dict.get('metadata', {}).get('context', section['title'].lower())
+                )
+
+                # Create question object
+                question = Question(
+                    id=q_dict['id'],
+                    text=q_dict['text'],
+                    type=q_dict.get('type', 'text'),
+                    required=q_dict.get('required', True),
+                    metadata=metadata,
+                    section=section['title']
+                )
+                questions_list.append(question)
+                logger.debug(f"Created Question object for {q_dict['id']}")
+            except Exception as e:
+                logger.error(f"Error converting question {q_dict.get('id', 'unknown')} to Question object: {str(e)}",
+                             exc_info=True)
+                continue
+
+    if not questions_list:
+        logger.error("No valid questions created")
+        return state
+
+    try:
+        logger.info(f"Processing {len(questions_list)} questions")
+        answers = asyncio.run(processor.process_questions(
+            questions=questions_list,
+            section=sections[0]['title'] if sections else "default"
+        ))
+
+        if answers:
+            if 'json_output' not in state:
+                state['json_output'] = {}
+
+            state['json_output']['answers'] = {
+                qid: {
+                    "text": answer.text,
+                    "confidence": answer.confidence,
+                    "sources": [
+                        {"file": src.get('source', 'Unknown'),
+                         "excerpt": src.get('content', '')[:200]}
+                        for src in (answer.sources or [])
+                    ],
+                    "metadata": answer.metadata
+                }
+                for qid, answer in answers.items()
+            }
+            logger.info(f"Successfully processed {len(answers)} answers")
+
+    except Exception as e:
+        logger.error(f"Error processing questions: {str(e)}", exc_info=True)
+
+    return state
 
 
 class SectionProcessor:
@@ -65,37 +158,68 @@ class SectionProcessor:
         # Combine results
         return {q.id: a for q, a in zip(questions, batch_results)}
 
-    async def process_question(self,
-                               section_name: str,
-                               question: Question) -> Answer:
-        """Process a single question"""
+    async def process_questions(self, questions: List[Question], section: str) -> Dict[str, Answer]:
+        """Process questions with optimized strategies and detailed logging"""
+        logger.info(f"Processing {len(questions)} questions from section {section}")
+
+        # Debug state content
+        print("\n=== Available Documents ===")
+        await self.retriever.debug_print_documents()
+
         try:
-            # Get cached section context
-            context = self.context_cache.get(section_name, [])
-
-            # Get question-specific context if needed
-            if self._needs_additional_context(question):
-                specific_context = await self.retriever.aget_relevant_context(
-                    question=question.text,
-                    metadata_filter={'doc_type': 'DDQ'}
-                )
-                context.extend(specific_context)
-
-            # Generate answer
-            response = await self._generate_answer(question, context)
-
-            return Answer(
-                text=response.content,
-                confidence=0.85,  # TODO: Implement confidence scoring
-                sources=context,
-                metadata={
-                    "question_type": question.type,
-                    "generated_at": datetime.now().isoformat()
+            # Analyze questions
+            analyzed_questions = [
+                {
+                    'question': q,
+                    'analysis': self.text_analyzer.analyze_question_type(q.text)
                 }
-            )
+                for q in questions
+            ]
+            logger.debug(f"Question analysis complete: {len(analyzed_questions)} questions analyzed")
+
+            # Group questions
+            grouped_questions = self._group_questions(analyzed_questions)
+            logger.debug(f"Questions grouped into {len(grouped_questions)} groups")
+
+            # Process each group
+            results = {}
+            for group_type, group_data in grouped_questions.items():
+                logger.info(f"Processing group {group_type} with {len(group_data['questions'])} questions")
+
+                # Get context for each question in the group
+                for question in group_data['questions']:
+                    context = await self.retriever.aget_relevant_context(
+                        question=question.text,
+                        metadata_filter={'doc_type': 'DDQ'}
+                    )
+                    print(f"\nRetrieved context for question {question.id}:")
+                    print(f"Context length: {len(context)}")
+                    if context:
+                        print(f"First context item: {context[0][:200]}...")
+                    else:
+                        print("No context found!")
+
+                q_type = group_data['type']
+                strategy = self.strategies.get(q_type, self.strategies['factual'])
+                logger.debug(f"Using strategy: {q_type}")
+
+                try:
+                    group_results = await self._process_group(
+                        questions=group_data['questions'],
+                        strategy=strategy,
+                        shared_context=group_data.get('shared_context')
+                    )
+                    logger.debug(f"Group {group_type} processing complete, got {len(group_results)} answers")
+                    results.update(group_results)
+                except Exception as e:
+                    logger.error(f"Error processing group {group_type}: {str(e)}", exc_info=True)
+
+            logger.info(f"Successfully processed {len(results)} questions")
+            logger.debug(f"Answer IDs: {list(results.keys())}")
+            return results
 
         except Exception as e:
-            logger.error(f"Error processing question {question.id}: {str(e)}")
+            logger.error(f"Error in process_questions: {str(e)}", exc_info=True)
             raise
 
     def _needs_additional_context(self, question: Question) -> bool:

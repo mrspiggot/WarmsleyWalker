@@ -11,6 +11,7 @@ from ddqpro.utils.confidence_scoring import ConfidenceScorer
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 import time
+from ddqpro.rag.retriever import RAGRetriever
 from ddqpro.models.llm_manager import LLMManager
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class EnhancedProcessor:
         self.retriever = retriever
         self.text_analyzer = TextAnalyzer()
         self.context_cache = {}
+        # Use the passed retriever’s vector store via LLMManager as before
         self.llm_manager = LLMManager()
         self.confidence_scorer = ConfidenceScorer()
         self.previous_answers = {}
@@ -340,71 +342,105 @@ class EnhancedProcessor:
         return self.context_cache[cache_key]
 
     async def _generate_answer(self, question: Question, context: Dict) -> Answer:
-        """Generate answer for a question using context"""
-        try:
-            logger.info(f"Generating answer for question {question.id}")
+        """Generate an answer for a given question using context"""
+        logger.info(f"Generating answer for question {question.id}")
 
-            # Generate answer
-            chain = self.answer_prompt | self.llm_manager.llm
+        try:
+            # Check if context is properly structured
+            context_content = []
+            if isinstance(context, dict):
+                context_content = context.get('content', [])
+            elif isinstance(context, list):
+                context_content = context
+
+            # Ensure context_content is a list
+            if not isinstance(context_content, list):
+                context_content = []
+
+            logger.debug(f"Context for question {question.id}: {context_content}")
+
+            prompt = ChatPromptTemplate.from_template("""
+                Use your skill and judgement to give the most likely answer to this question given the Context. 
+                Question: {question}
+                Category: {category}
+                Context: {context}
+
+                Answer the question as if you were an experienced investment professional:
+                Answer:
+            """)
+
+            chain = prompt | self.llm_manager.llm
+
+            # Create joined context string from properly formatted context items
+            context_text = "\n\n".join(
+                doc['content'] if isinstance(doc, dict) and 'content' in doc
+                else str(doc)
+                for doc in context_content
+            )
+
             response = await chain.ainvoke({
                 "question": question.text,
-                "question_type": question.type,
                 "category": question.metadata.category,
-                "context": self._format_context(context['content'])
+                "context": context_text
             })
 
-            # Extract response text
+            # Ensure response is correctly extracted
             response_text = response.content if hasattr(response, 'content') else str(response)
 
-            # Calculate confidence with error handling
-            try:
-                confidence_score, metrics = self.confidence_scorer.calculate_confidence(
-                    question=question.text,
-                    answer=response_text,
-                    context=context['content'],
-                    response_metadata={
-                        'token_usage': getattr(response, 'usage', {}).get('total_tokens', 0),
-                        'generation_time': 0.0  # Add timing if needed
-                    },
-                    previous_answers=self.previous_answers
-                )
-            except Exception as e:
-                logger.error(f"Error calculating confidence: {str(e)}")
-                confidence_score = 0.7
-                metrics = None
+            if not response_text.strip():
+                logger.warning(f"Empty response for question {question.id}")
+                response_text = "No answer available based on provided context."
 
-            # Create answer object
-            answer = Answer(
+            # Create a valid sources list for the Answer model
+            sources = [
+                {
+                    'source': doc.get('source', 'Unknown') if isinstance(doc, dict) else 'Unknown',
+                    'content': doc.get('content', '') if isinstance(doc, dict) else str(doc)
+                }
+                for doc in context_content
+            ]
+
+            return Answer(
                 text=response_text,
-                confidence=confidence_score,
-                sources=context['content'],
+                confidence=0.85,  # We'll improve this later
+                sources=sources,  # Now properly formatted as a list of dicts
                 metadata={
-                    'question_type': question.type,
-                    'generated_at': datetime.utcnow().isoformat(),
-                    'context_query': context.get('query'),
-                    'key_terms': context.get('terms'),
-                    'confidence_metrics': metrics.__dict__ if metrics else None
+                    "question_type": question.type,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "context_used": bool(context_content)
                 }
             )
 
-            # Store for future consistency checking
-            self.previous_answers[question.id] = response_text
-
-            return answer
-
         except Exception as e:
-            logger.error(f"Error in _generate_answer for question {question.id}: {str(e)}")
-            raise
+            logger.error(f"Error generating answer for question {question.id}: {str(e)}", exc_info=True)
+            # Return a fallback answer rather than raising an exception
+            return Answer(
+                text="Error generating answer: insufficient context or processing error.",
+                confidence=0.0,
+                sources=[],  # Empty list instead of None
+                metadata={
+                    "question_type": question.type,
+                    "error": str(e),
+                    "generated_at": datetime.utcnow().isoformat()
+                }
+            )
 
     async def _generate_answer_old(self, question: Question, context: Dict) -> Answer:
         """Generate answer for a question using context"""
+        print(question)
         try:
             # Create prompt based on question type and complexity
             prompt = self._create_prompt(question, context)
+            print(f"Full Prompt: {prompt.format(**{  # Log the full prompt
+                'question': question.text,
+                'category': question.metadata.category,
+                'context': "\n\n".join([doc.get('content', '') for doc in context])
+            })}")
 
             # Generate answer using LLM and track generation time
             start_time = time.time()
             response = await self.llm.agenerate(prompt)
+            print(response)
             generation_time = time.time() - start_time
 
             # Add generation time to metadata

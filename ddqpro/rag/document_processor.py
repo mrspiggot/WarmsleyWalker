@@ -50,47 +50,41 @@ class CorpusProcessor:
         self.vector_store = InMemoryVectorStore(embedding=self.embeddings)
 
     def ingest_documents(self, reset_db: bool = False) -> None:
-        """
-        Process all documents in the corpus directory and store them in memory.
-        If reset_db=True, we can optionally clear out anything we've previously stored.
-        """
-        logger.debug("\n=== Starting Document Ingestion ===")
-        logger.debug(f"Corpus directory: {self.corpus_dir}")
+        """Process all documents in the corpus directory and store them in memory."""
+        logger.info(f"\n=== Starting Document Ingestion ===")
+        logger.info(f"Corpus directory: {self.corpus_dir}")
 
+        # If resetting, clear existing documents
         if reset_db:
-            logger.info("reset_db=True requested; clearing in‑memory documents (if any)")
-            # Because InMemoryVectorStore doesn’t persist data, a simple re‑instantiate is enough:
+            logger.info("Resetting document store...")
             self.vector_store = InMemoryVectorStore(embedding=self.embeddings)
 
-        logger.info(f"Processing documents from {self.corpus_dir}")
-
-        # Collect new documents as we parse them
         documents = []
 
         # Traverse all files in corpus dir
         for file_path in self.corpus_dir.glob("**/*"):
-            # skip directories
             if not file_path.is_file():
                 continue
 
             try:
+                logger.info(f"\nProcessing file: {file_path}")
                 if file_path.suffix.lower() == ".pdf":
-                    logger.info(f"Processing PDF: {file_path}")
-                    # loader = PyPDFLoader(str(file_path)) Fitz style
                     loader = PDFPlumberLoader(str(file_path))
                     docs = loader.load()
+                    logger.info(f"Loaded {len(docs)} pages from PDF")
                 elif file_path.suffix.lower() in [".docx", ".txt"]:
-                    logger.info(f"Processing document: {file_path}")
                     loader = UnstructuredLoader(str(file_path))
                     docs = loader.load()
+                    logger.info(f"Loaded document: {len(docs)} sections")
                 else:
                     logger.warning(f"Skipping unsupported file type: {file_path}")
                     continue
 
                 # Split into chunks
                 chunks = self.text_splitter.split_documents(docs)
+                logger.info(f"Split into {len(chunks)} chunks")
 
-                # Add helpful metadata to each chunk
+                # Add metadata
                 for i, chunk in enumerate(chunks):
                     chunk.metadata.update({
                         "source_file": str(file_path),
@@ -99,22 +93,19 @@ class CorpusProcessor:
                         "total_chunks": len(chunks),
                     })
 
-                # Accumulate them all
                 documents.extend(chunks)
-                logger.info(
-                    f"Successfully processed {file_path}: {len(chunks)} chunks created"
-                )
+                logger.info(f"Processed {file_path}: {len(chunks)} chunks added")
 
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {str(e)}")
 
-        # Add all the new documents to our in‑memory vector store
+        # Add all documents to vector store
         if documents:
-            logger.info(f"Adding {len(documents)} document chunks to in‑memory store...")
+            logger.info(f"\nAdding {len(documents)} chunks to vector store...")
             self.vector_store.add_documents(documents=documents)
-            logger.info("In‑memory ingestion complete.")
+            logger.info("Documents added successfully")
         else:
-            logger.warning("No new documents found or processed.")
+            logger.warning("No documents processed")
 
 
     def _reset_vector_db(self):
@@ -151,9 +142,9 @@ class CorpusProcessor:
         if any(term in filename for term in ['ddq', 'questionnaire']):
             return 'DDQ'
         elif any(term in filename for term in ['lpa', 'agreement']):
-            return 'LPA'
+            return 'DDQ'
         else:
-            return 'OTHER'
+            return 'DDQ'
 
     def _store_documents(self, documents: List) -> None:
         if not documents:

@@ -57,9 +57,12 @@ class FileUploader:
         )
 
         if uploaded_files:
+            logger.info(f"\nProcessing {len(uploaded_files)} uploaded corpus files")
             processed_files = self._process_corpus_files(uploaded_files)
-            self._show_corpus_summary(processed_files)
-            return processed_files
+            if processed_files:
+                logger.info(f"Successfully processed {len(processed_files)} files")
+                self._show_corpus_summary(processed_files)
+                return processed_files
         return []
 
     def render_ddq_uploader(self) -> Optional[UploadedFile]:

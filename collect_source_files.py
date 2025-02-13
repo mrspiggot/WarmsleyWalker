@@ -5,7 +5,7 @@ import os
 # List of files and directories to exclude
 EXCLUDES = ['.git', '__pycache__', 'venv', 'env', '.env', 'build', 'dist', 'setup.py',
             'setup_project_structure.py', 'collect_source_files.py', "assets", ".venv", "ddqpro.egg-info",
-            ".gitignore", "requirements.txt", "setup.py" "data/utils", "docs", "main.py"]
+            ".gitignore", "requirements.txt", "setup.py" "data", "docs", "main.py", "data/utils"]
 
 def should_exclude(path, excludes):
     for exclude in excludes:

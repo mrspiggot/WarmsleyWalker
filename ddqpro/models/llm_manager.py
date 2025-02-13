@@ -14,6 +14,8 @@ class LLMManager:
 
     def initialize(self, provider: str, model_name: str, **kwargs):
         """Initialize the LLM with specified provider and model"""
+        print(f"Initializing LLM with provider: {provider}, model: {model_name}")  # Debug print
+
         factory = LLMFactory()
         self._llm = factory.create_llm(provider, model_name, **kwargs)
 
